@@ -53,6 +53,28 @@
         .row-new {
             background: #1b2a22;
         }
+
+        .chart-panel {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #151922;
+            border-radius: 8px;
+        }
+
+        .chart-title {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #9aa4b2;
+        }
+
+        #candleChart {
+            width: 100%;
+            height: 260px;
+            display: block;
+            background: #0f141c;
+            border: 1px solid #2b3240;
+            border-radius: 6px;
+        }
     </style>
 </head>
 <body>
@@ -63,6 +85,11 @@
         <div>Total ticks: <span id="totalTicks">0</span></div>
         <div>Buffered ticks: <span id="bufferedTicks">0</span></div>
         <div>Last tick UTC: <span id="lastTickUtc">-</span></div>
+    </div>
+
+    <div class="chart-panel">
+        <p class="chart-title">5-second candlestick chart (NQ)</p>
+        <canvas id="candleChart" width="1200" height="260"></canvas>
     </div>
 
     <table>
@@ -84,6 +111,140 @@
         const bufferedTicks = document.getElementById("bufferedTicks");
         const lastTickUtc = document.getElementById("lastTickUtc");
         const ticksBody = document.getElementById("ticksBody");
+        const candleChart = document.getElementById("candleChart");
+        const chartCtx = candleChart.getContext("2d");
+
+        const candleIntervalMs = 5000;
+        const maxCandles = 80;
+        const candles = [];
+
+        function bucketStartMs(timestampMs) {
+            return Math.floor(timestampMs / candleIntervalMs) * candleIntervalMs;
+        }
+
+        function formatBucketLabel(startMs) {
+            const date = new Date(startMs);
+            return date.toISOString().slice(11, 19);
+        }
+
+        function upsertCandle(tick) {
+            const tickTimeMs = new Date(tick.utcTime).getTime();
+
+            if (Number.isNaN(tickTimeMs)) {
+                return;
+            }
+
+            const bucketMs = bucketStartMs(tickTimeMs);
+            const price = Number(tick.price);
+
+            if (Number.isNaN(price)) {
+                return;
+            }
+
+            let candle = candles.find(c => c.startMs === bucketMs);
+
+            if (!candle) {
+                candle = {
+                    startMs: bucketMs,
+                    open: price,
+                    high: price,
+                    low: price,
+                    close: price
+                };
+                candles.push(candle);
+                candles.sort((a, b) => a.startMs - b.startMs);
+            } else {
+                candle.high = Math.max(candle.high, price);
+                candle.low = Math.min(candle.low, price);
+                candle.close = price;
+            }
+
+            while (candles.length > maxCandles) {
+                candles.shift();
+            }
+        }
+
+        function renderCandles() {
+            const width = candleChart.width;
+            const height = candleChart.height;
+            const padding = { top: 16, right: 16, bottom: 28, left: 44 };
+
+            chartCtx.clearRect(0, 0, width, height);
+
+            if (candles.length === 0) {
+                chartCtx.fillStyle = "#9aa4b2";
+                chartCtx.font = "13px Arial";
+                chartCtx.fillText("Waiting for tick data...", 16, 24);
+                return;
+            }
+
+            const highs = candles.map(c => c.high);
+            const lows = candles.map(c => c.low);
+            const maxPrice = Math.max(...highs);
+            const minPrice = Math.min(...lows);
+            const range = Math.max(maxPrice - minPrice, 0.01);
+
+            const chartLeft = padding.left;
+            const chartTop = padding.top;
+            const chartRight = width - padding.right;
+            const chartBottom = height - padding.bottom;
+            const chartWidth = chartRight - chartLeft;
+            const chartHeight = chartBottom - chartTop;
+            const xStep = chartWidth / Math.max(candles.length, 1);
+            const bodyWidth = Math.max(3, xStep * 0.65);
+
+            const yForPrice = (price) =>
+                chartBottom - ((price - minPrice) / range) * chartHeight;
+
+            chartCtx.strokeStyle = "#2b3240";
+            chartCtx.lineWidth = 1;
+            chartCtx.beginPath();
+            chartCtx.moveTo(chartLeft, chartTop);
+            chartCtx.lineTo(chartLeft, chartBottom);
+            chartCtx.lineTo(chartRight, chartBottom);
+            chartCtx.stroke();
+
+            chartCtx.fillStyle = "#8b97a8";
+            chartCtx.font = "11px Arial";
+            chartCtx.fillText(maxPrice.toFixed(2), 4, chartTop + 4);
+            chartCtx.fillText(minPrice.toFixed(2), 4, chartBottom - 2);
+
+            candles.forEach((candle, index) => {
+                const xCenter = chartLeft + index * xStep + xStep / 2;
+                const yHigh = yForPrice(candle.high);
+                const yLow = yForPrice(candle.low);
+                const yOpen = yForPrice(candle.open);
+                const yClose = yForPrice(candle.close);
+                const isUp = candle.close >= candle.open;
+                const color = isUp ? "#22c55e" : "#ef4444";
+
+                chartCtx.strokeStyle = color;
+                chartCtx.beginPath();
+                chartCtx.moveTo(xCenter, yHigh);
+                chartCtx.lineTo(xCenter, yLow);
+                chartCtx.stroke();
+
+                const bodyTop = Math.min(yOpen, yClose);
+                const bodyHeight = Math.max(1, Math.abs(yOpen - yClose));
+
+                chartCtx.fillStyle = color;
+                chartCtx.fillRect(
+                    xCenter - bodyWidth / 2,
+                    bodyTop,
+                    bodyWidth,
+                    bodyHeight
+                );
+
+                if (index % Math.ceil(candles.length / 6) === 0 || index === candles.length - 1) {
+                    chartCtx.fillStyle = "#8b97a8";
+                    chartCtx.fillText(
+                        formatBucketLabel(candle.startMs),
+                        xCenter - 18,
+                        height - 8
+                    );
+                }
+            });
+        }
 
         async function loadStatus() {
             try {
@@ -103,11 +264,11 @@
             row.className = "row-new";
 
             row.innerHTML = `
-                <td>${tick.symbol}</td>
-                <td>${tick.price}</td>
-                <td>${tick.size}</td>
-                <td>${tick.utcTime}</td>
-            `;
+                        <td>${tick.symbol}</td>
+                        <td>${tick.price}</td>
+                        <td>${tick.size}</td>
+                        <td>${tick.utcTime}</td>
+                    `;
 
             ticksBody.prepend(row);
 
@@ -124,10 +285,14 @@
                 const ticks = await response.json();
 
                 ticksBody.innerHTML = "";
+                candles.length = 0;
 
                 for (const tick of ticks.reverse()) {
                     prependTickRow(tick);
+                    upsertCandle(tick);
                 }
+
+                renderCandles();
             } catch (err) {
                 console.error("Initial ticks load failed:", err);
             }
@@ -141,6 +306,8 @@
         connection.on("tick", (tick) => {
             prependTickRow(tick);
             loadStatus();
+            upsertCandle(tick);
+            renderCandles();
         });
 
         connection.onreconnecting(() => {
