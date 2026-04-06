@@ -6,12 +6,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<MarketState>();
 builder.Services.AddHostedService<FakeFeedWorker>();
 builder.Services.AddSignalR();
-builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();
 
-
-app.MapGet("/", () => Results.Ok(new { Name = "MarketPulseX", Status = "Running" }));
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.MapGet("/api/status", (MarketState state) =>
 {

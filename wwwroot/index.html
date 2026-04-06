@@ -1,0 +1,182 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MarketProbe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+            background: #0f1115;
+            color: #e6e6e6;
+        }
+
+        h1 {
+            margin-bottom: 8px;
+        }
+
+        .status {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #1a1f29;
+            border-radius: 8px;
+        }
+
+        .ok {
+            color: #6ee7b7;
+        }
+
+        .bad {
+            color: #fca5a5;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #151922;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #2b3240;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        th {
+            background: #1d2430;
+        }
+
+        .row-new {
+            background: #1b2a22;
+        }
+    </style>
+</head>
+<body>
+    <h1>MarketPulseX Live Ticks</h1>
+
+    <div class="status">
+        <div>Hub status: <span id="hubStatus" class="bad">Disconnected</span></div>
+        <div>Total ticks: <span id="totalTicks">0</span></div>
+        <div>Buffered ticks: <span id="bufferedTicks">0</span></div>
+        <div>Last tick UTC: <span id="lastTickUtc">-</span></div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Price</th>
+                <th>Size</th>
+                <th>UTC Time</th>
+            </tr>
+        </thead>
+        <tbody id="ticksBody"></tbody>
+    </table>
+
+    <script src="/js/signalr/dist/browser/signalr.js"></script>
+    <script>
+        const hubStatus = document.getElementById("hubStatus");
+        const totalTicks = document.getElementById("totalTicks");
+        const bufferedTicks = document.getElementById("bufferedTicks");
+        const lastTickUtc = document.getElementById("lastTickUtc");
+        const ticksBody = document.getElementById("ticksBody");
+
+        async function loadStatus() {
+            try {
+                const response = await fetch("/api/status");
+                const data = await response.json();
+
+                totalTicks.textContent = data.totalTicks ?? 0;
+                bufferedTicks.textContent = data.bufferedTicks ?? 0;
+                lastTickUtc.textContent = data.lastTickUtc ?? "-";
+            } catch (err) {
+                console.error("Status load failed:", err);
+            }
+        }
+
+        function prependTickRow(tick) {
+            const row = document.createElement("tr");
+            row.className = "row-new";
+
+            row.innerHTML = `
+                <td>${tick.symbol}</td>
+                <td>${tick.price}</td>
+                <td>${tick.size}</td>
+                <td>${tick.utcTime}</td>
+            `;
+
+            ticksBody.prepend(row);
+
+            while (ticksBody.children.length > 100) {
+                ticksBody.removeChild(ticksBody.lastChild);
+            }
+
+            setTimeout(() => row.classList.remove("row-new"), 800);
+        }
+
+        async function loadInitialTicks() {
+            try {
+                const response = await fetch("/api/latest?take=20");
+                const ticks = await response.json();
+
+                ticksBody.innerHTML = "";
+
+                for (const tick of ticks.reverse()) {
+                    prependTickRow(tick);
+                }
+            } catch (err) {
+                console.error("Initial ticks load failed:", err);
+            }
+        }
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/hubs/market")
+            .withAutomaticReconnect()
+            .build();
+
+        connection.on("tick", (tick) => {
+            prependTickRow(tick);
+            loadStatus();
+        });
+
+        connection.onreconnecting(() => {
+            hubStatus.textContent = "Reconnecting...";
+            hubStatus.className = "bad";
+        });
+
+        connection.onreconnected(() => {
+            hubStatus.textContent = "Connected";
+            hubStatus.className = "ok";
+        });
+
+        connection.onclose(() => {
+            hubStatus.textContent = "Disconnected";
+            hubStatus.className = "bad";
+        });
+
+        async function start() {
+            await loadStatus();
+            await loadInitialTicks();
+
+            try {
+                await connection.start();
+                hubStatus.textContent = "Connected";
+                hubStatus.className = "ok";
+                console.log("SignalR connected.");
+            } catch (err) {
+                hubStatus.textContent = "Disconnected";
+                hubStatus.className = "bad";
+                console.error("SignalR start failed:", err);
+                setTimeout(start, 2000);
+            }
+        }
+
+        start();
+        setInterval(loadStatus, 2000);
+    </script>
+</body>
+</html>
