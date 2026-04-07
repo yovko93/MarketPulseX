@@ -1,11 +1,21 @@
 using MarketPulseX.Hubs;
 using MarketPulseX.Services;
+using MarketPulseX.Services.Ingestion;
+using MarketPulseX.Services.Ingestion.Adapters;
+using MarketPulseX.Services.Ingestion.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<MarketState>();
-//builder.Services.AddHostedService<FakeFeedWorker>();
-builder.Services.AddHostedService<EodHdUsTradesWorker>();
+builder.Services.Configure<IngestionOptions>(
+    builder.Configuration.GetSection(IngestionOptions.SectionName));
+
+builder.Services.AddSingleton<IMarketDataAdapter, TradovateMarketDataAdapter>();
+builder.Services.AddSingleton<IMarketDataAdapter, RithmicMarketDataAdapter>();
+builder.Services.AddSingleton<IMarketDataAdapter, CmeMdpMarketDataAdapter>();
+builder.Services.AddSingleton<IMarketDataAdapterSelector, MarketDataAdapterSelector>();
+
+builder.Services.AddHostedService<MarketDataIngestionWorker>();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
