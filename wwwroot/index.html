@@ -67,6 +67,31 @@
             color: #9aa4b2;
         }
 
+        .chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .chart-controls {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #c0c7d1;
+        }
+
+        #timeframeSelect {
+            border: 1px solid #2b3240;
+            background: #0f141c;
+            color: #e6e6e6;
+            border-radius: 4px;
+            padding: 5px 8px;
+            font-size: 13px;
+        }
+
         #candleChart {
             width: 100%;
             height: 260px;
@@ -88,7 +113,18 @@
     </div>
 
     <div class="chart-panel">
-        <p class="chart-title">5-second candlestick chart (NQ)</p>
+        <div class="chart-header">
+            <p id="chartTitle" class="chart-title">5-second candlestick chart (NQ)</p>
+            <label class="chart-controls" for="timeframeSelect">
+                Timeframe
+                <select id="timeframeSelect">
+                    <option value="5000">5s</option>
+                    <option value="15000">15s</option>
+                    <option value="30000">30s</option>
+                    <option value="60000">1m</option>
+                </select>
+            </label>
+        </div>
         <canvas id="candleChart" width="1200" height="260"></canvas>
     </div>
 
@@ -112,10 +148,21 @@
         const lastTickUtc = document.getElementById("lastTickUtc");
         const ticksBody = document.getElementById("ticksBody");
         const candleChart = document.getElementById("candleChart");
+        const chartTitle = document.getElementById("chartTitle");
+        const timeframeSelect = document.getElementById("timeframeSelect");
         const chartCtx = candleChart.getContext("2d");
 
-        const candleIntervalMs = 5000;
+        const timeframeLabels = {
+            5000: "5-second",
+            15000: "15-second",
+            30000: "30-second",
+            60000: "1-minute"
+        };
+
+        let candleIntervalMs = Number(timeframeSelect.value);
         const maxCandles = 80;
+        const maxTickHistory = 1000;
+        const tickHistory = [];
         const candles = [];
 
         function bucketStartMs(timestampMs) {
@@ -162,6 +209,26 @@
             while (candles.length > maxCandles) {
                 candles.shift();
             }
+        }
+
+        function trackTick(tick) {
+            tickHistory.push(tick);
+            while (tickHistory.length > maxTickHistory) {
+                tickHistory.shift();
+            }
+        }
+
+        function rebuildCandlesFromHistory() {
+            candles.length = 0;
+            for (const tick of tickHistory) {
+                upsertCandle(tick);
+            }
+            renderCandles();
+        }
+
+        function updateChartTitle() {
+            const label = timeframeLabels[candleIntervalMs] ?? `${Math.round(candleIntervalMs / 1000)}-second`;
+            chartTitle.textContent = `${label} candlestick chart (NQ)`;
         }
 
         function renderCandles() {
@@ -286,13 +353,14 @@
 
                 ticksBody.innerHTML = "";
                 candles.length = 0;
+                tickHistory.length = 0;
 
                 for (const tick of ticks.reverse()) {
                     prependTickRow(tick);
-                    upsertCandle(tick);
+                    trackTick(tick);
                 }
 
-                renderCandles();
+                rebuildCandlesFromHistory();
             } catch (err) {
                 console.error("Initial ticks load failed:", err);
             }
@@ -306,8 +374,15 @@
         connection.on("tick", (tick) => {
             prependTickRow(tick);
             loadStatus();
+            trackTick(tick);
             upsertCandle(tick);
             renderCandles();
+        });
+
+        timeframeSelect.addEventListener("change", () => {
+            candleIntervalMs = Number(timeframeSelect.value);
+            updateChartTitle();
+            rebuildCandlesFromHistory();
         });
 
         connection.onreconnecting(() => {
@@ -326,6 +401,7 @@
         });
 
         async function start() {
+            updateChartTitle();
             await loadStatus();
             await loadInitialTicks();
 
