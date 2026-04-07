@@ -4,7 +4,8 @@ using MarketPulseX.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<MarketState>();
-builder.Services.AddHostedService<FakeFeedWorker>();
+//builder.Services.AddHostedService<FakeFeedWorker>();
+builder.Services.AddHostedService<EodHdUsTradesWorker>();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
