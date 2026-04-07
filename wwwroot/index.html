@@ -67,6 +67,14 @@
             color: #9aa4b2;
         }
 
+        .chart-title small {
+            display: block;
+            margin-top: 4px;
+            color: #728095;
+            font-size: 12px;
+            font-weight: normal;
+        }
+
         .chart-header {
             display: flex;
             align-items: center;
@@ -81,6 +89,20 @@
             gap: 8px;
             font-size: 13px;
             color: #c0c7d1;
+        }
+
+        .chart-controls button {
+            border: 1px solid #2b3240;
+            background: #0f141c;
+            color: #e6e6e6;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .chart-controls button:hover {
+            background: #1b2330;
         }
 
         #timeframeSelect {
@@ -114,7 +136,10 @@
 
     <div class="chart-panel">
         <div class="chart-header">
-            <p id="chartTitle" class="chart-title">5-second candlestick chart (NQ)</p>
+            <p id="chartTitle" class="chart-title">
+                <span id="chartTitleText">5-second candlestick chart (NQ)</span>
+                <small>Scroll over candles/bottom axis for time zoom. Scroll over left price scale for price zoom.</small>
+            </p>
             <label class="chart-controls" for="timeframeSelect">
                 Timeframe
                 <select id="timeframeSelect">
@@ -124,6 +149,11 @@
                     <option value="60000">1m</option>
                 </select>
             </label>
+            <div class="chart-controls">
+                <button id="zoomOutButton" type="button">Zoom Out</button>
+                <button id="zoomInButton" type="button">Zoom In</button>
+                <button id="zoomResetButton" type="button">Reset</button>
+            </div>
         </div>
         <canvas id="candleChart" width="1200" height="260"></canvas>
     </div>
@@ -148,8 +178,11 @@
         const lastTickUtc = document.getElementById("lastTickUtc");
         const ticksBody = document.getElementById("ticksBody");
         const candleChart = document.getElementById("candleChart");
-        const chartTitle = document.getElementById("chartTitle");
+        const chartTitleText = document.getElementById("chartTitleText");
         const timeframeSelect = document.getElementById("timeframeSelect");
+        const zoomInButton = document.getElementById("zoomInButton");
+        const zoomOutButton = document.getElementById("zoomOutButton");
+        const zoomResetButton = document.getElementById("zoomResetButton");
         const chartCtx = candleChart.getContext("2d");
 
         const timeframeLabels = {
@@ -161,9 +194,16 @@
 
         let candleIntervalMs = Number(timeframeSelect.value);
         const maxCandles = 80;
+        const defaultVisibleCandles = 40;
+        const minVisibleCandles = 10;
         const maxTickHistory = 1000;
         const tickHistory = [];
         const candles = [];
+        let visibleCandles = defaultVisibleCandles;
+        let priceZoomLevel = 1;
+        const minPriceZoomLevel = 1;
+        const maxPriceZoomLevel = 6;
+        let lastPointer = { x: 0, y: 0 };
 
         function bucketStartMs(timestampMs) {
             return Math.floor(timestampMs / candleIntervalMs) * candleIntervalMs;
@@ -228,7 +268,7 @@
 
         function updateChartTitle() {
             const label = timeframeLabels[candleIntervalMs] ?? `${Math.round(candleIntervalMs / 1000)}-second`;
-            chartTitle.textContent = `${label} candlestick chart (NQ)`;
+            chartTitleText.textContent = `${label} candlestick chart (NQ)`;
         }
 
         function renderCandles() {
@@ -245,10 +285,16 @@
                 return;
             }
 
-            const highs = candles.map(c => c.high);
-            const lows = candles.map(c => c.low);
-            const maxPrice = Math.max(...highs);
-            const minPrice = Math.min(...lows);
+            const visibleSlice = candles.slice(-visibleCandles);
+            const highs = visibleSlice.map(c => c.high);
+            const lows = visibleSlice.map(c => c.low);
+            const rawMaxPrice = Math.max(...highs);
+            const rawMinPrice = Math.min(...lows);
+            const rawRange = Math.max(rawMaxPrice - rawMinPrice, 0.01);
+            const centerPrice = (rawMaxPrice + rawMinPrice) / 2;
+            const scaledRange = rawRange * priceZoomLevel;
+            const maxPrice = centerPrice + scaledRange / 2;
+            const minPrice = centerPrice - scaledRange / 2;
             const range = Math.max(maxPrice - minPrice, 0.01);
 
             const chartLeft = padding.left;
@@ -257,11 +303,31 @@
             const chartBottom = height - padding.bottom;
             const chartWidth = chartRight - chartLeft;
             const chartHeight = chartBottom - chartTop;
-            const xStep = chartWidth / Math.max(candles.length, 1);
+            const xStep = chartWidth / Math.max(visibleSlice.length, 1);
             const bodyWidth = Math.max(3, xStep * 0.65);
+            const horizontalGridLines = 5;
+            const verticalGridLines = 6;
 
             const yForPrice = (price) =>
                 chartBottom - ((price - minPrice) / range) * chartHeight;
+
+            chartCtx.strokeStyle = "#1e2532";
+            chartCtx.lineWidth = 1;
+            for (let i = 0; i <= horizontalGridLines; i++) {
+                const y = chartTop + (chartHeight * i) / horizontalGridLines;
+                chartCtx.beginPath();
+                chartCtx.moveTo(chartLeft, y);
+                chartCtx.lineTo(chartRight, y);
+                chartCtx.stroke();
+            }
+
+            for (let i = 0; i <= verticalGridLines; i++) {
+                const x = chartLeft + (chartWidth * i) / verticalGridLines;
+                chartCtx.beginPath();
+                chartCtx.moveTo(x, chartTop);
+                chartCtx.lineTo(x, chartBottom);
+                chartCtx.stroke();
+            }
 
             chartCtx.strokeStyle = "#2b3240";
             chartCtx.lineWidth = 1;
@@ -273,10 +339,13 @@
 
             chartCtx.fillStyle = "#8b97a8";
             chartCtx.font = "11px Arial";
-            chartCtx.fillText(maxPrice.toFixed(2), 4, chartTop + 4);
-            chartCtx.fillText(minPrice.toFixed(2), 4, chartBottom - 2);
+            for (let i = 0; i <= horizontalGridLines; i++) {
+                const price = maxPrice - (range * i) / horizontalGridLines;
+                const y = chartTop + (chartHeight * i) / horizontalGridLines;
+                chartCtx.fillText(price.toFixed(2), 4, y + 3);
+            }
 
-            candles.forEach((candle, index) => {
+            visibleSlice.forEach((candle, index) => {
                 const xCenter = chartLeft + index * xStep + xStep / 2;
                 const yHigh = yForPrice(candle.high);
                 const yLow = yForPrice(candle.low);
@@ -302,7 +371,7 @@
                     bodyHeight
                 );
 
-                if (index % Math.ceil(candles.length / 6) === 0 || index === candles.length - 1) {
+                if (index % Math.ceil(visibleSlice.length / 6) === 0 || index === visibleSlice.length - 1) {
                     chartCtx.fillStyle = "#8b97a8";
                     chartCtx.fillText(
                         formatBucketLabel(candle.startMs),
@@ -384,6 +453,61 @@
             updateChartTitle();
             rebuildCandlesFromHistory();
         });
+
+        function clampVisibleCandles(nextValue) {
+            const maxVisible = Math.max(minVisibleCandles, candles.length || maxCandles);
+            visibleCandles = Math.min(Math.max(nextValue, minVisibleCandles), maxVisible);
+        }
+
+        function clampPriceZoom(nextValue) {
+            priceZoomLevel = Math.min(Math.max(nextValue, minPriceZoomLevel), maxPriceZoomLevel);
+        }
+
+        zoomInButton.addEventListener("click", () => {
+            clampVisibleCandles(visibleCandles - 5);
+            renderCandles();
+        });
+
+        zoomOutButton.addEventListener("click", () => {
+            clampVisibleCandles(visibleCandles + 5);
+            renderCandles();
+        });
+
+        zoomResetButton.addEventListener("click", () => {
+            visibleCandles = defaultVisibleCandles;
+            priceZoomLevel = 1;
+            renderCandles();
+        });
+
+        candleChart.addEventListener("mousemove", (event) => {
+            const rect = candleChart.getBoundingClientRect();
+            const scaleX = candleChart.width / rect.width;
+            const scaleY = candleChart.height / rect.height;
+            lastPointer = {
+                x: (event.clientX - rect.left) * scaleX,
+                y: (event.clientY - rect.top) * scaleY
+            };
+        });
+
+        candleChart.addEventListener("wheel", (event) => {
+            event.preventDefault();
+            const height = candleChart.height;
+            const padding = { top: 16, right: 16, bottom: 28, left: 44 };
+            const chartLeft = padding.left;
+            const chartBottom = height - padding.bottom;
+            const inPriceScale = lastPointer.x <= chartLeft && lastPointer.y >= padding.top && lastPointer.y <= chartBottom;
+            const zoomDirection = event.deltaY > 0 ? 1 : -1;
+
+            if (inPriceScale) {
+                const priceZoomStep = 0.2;
+                clampPriceZoom(priceZoomLevel + zoomDirection * priceZoomStep);
+            } else {
+                const timeZoomStep = 4;
+                clampVisibleCandles(visibleCandles + zoomDirection * timeZoomStep);
+            }
+
+            renderCandles();
+        }, { passive: false });
 
         connection.onreconnecting(() => {
             hubStatus.textContent = "Reconnecting...";
