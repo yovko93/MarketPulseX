@@ -4,8 +4,14 @@ using MarketPulseX.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<MarketState>();
+builder.Services.AddHttpClient(nameof(CryptoApisExchangeRateWorker), client =>
+{
+    client.BaseAddress = new Uri("https://rest.cryptoapis.io/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 //builder.Services.AddHostedService<FakeFeedWorker>();
-builder.Services.AddHostedService<EodHdUsTradesWorker>();
+//builder.Services.AddHostedService<EodHdUsTradesWorker>();
+builder.Services.AddHostedService<CryptoApisExchangeRateWorker>();
 builder.Services.AddSignalR();
 
 var app = builder.Build();

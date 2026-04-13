@@ -137,7 +137,7 @@
     <div class="chart-panel">
         <div class="chart-header">
             <p id="chartTitle" class="chart-title">
-                <span id="chartTitleText">5-second candlestick chart (NQ)</span>
+                <span id="chartTitleText">5-second candlestick chart (BTC/USD)</span>
                 <small>Scroll over candles/bottom axis for time zoom. Scroll over left price scale for price zoom.</small>
             </p>
             <label class="chart-controls" for="timeframeSelect">
@@ -204,6 +204,7 @@
         const minPriceZoomLevel = 1;
         const maxPriceZoomLevel = 6;
         let lastPointer = { x: 0, y: 0 };
+        let currentSymbol = "BTC/USD";
 
         function bucketStartMs(timestampMs) {
             return Math.floor(timestampMs / candleIntervalMs) * candleIntervalMs;
@@ -261,6 +262,7 @@
         function rebuildCandlesFromHistory() {
             candles.length = 0;
             for (const tick of tickHistory) {
+                currentSymbol = tick.symbol ?? currentSymbol;
                 upsertCandle(tick);
             }
             renderCandles();
@@ -268,7 +270,7 @@
 
         function updateChartTitle() {
             const label = timeframeLabels[candleIntervalMs] ?? `${Math.round(candleIntervalMs / 1000)}-second`;
-            chartTitleText.textContent = `${label} candlestick chart (NQ)`;
+            chartTitleText.textContent = `${label} candlestick chart (${currentSymbol})`;
         }
 
         function renderCandles() {
@@ -444,6 +446,7 @@
             prependTickRow(tick);
             loadStatus();
             trackTick(tick);
+            currentSymbol = tick.symbol ?? currentSymbol;
             upsertCandle(tick);
             renderCandles();
         });
